@@ -18,7 +18,12 @@ def readVideo():
         rects = np.array([[x, y, x + w, y + h] for (x, y, w, h) in rects])
         pick = non_max_suppression(rects, probs=None, overlapThresh=0.65)
         for (xA, yA, xB, yB) in pick:
-            cv2.rectangle(frame, (xA, yA), (xB, yB), (0, 255, 0), 2)
+            #cv2.rectangle(frame, (xA, yA), (xB, yB), (0, 255, 0), 2)
+            human = frame[yA:yB, xA:xB]
+            threshHuman = cv2.Canny(human,100,200)
+            contours,high = cv2.findContours(threshHuman, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+            c  = sorted(contours, key=cv2.contourArea, reverse=True)
+            cv2.drawContours(frame, c, 1, (0,255,0), 3)
         k = cv2.waitKey(1)
         cv2.imshow('test' , np.array(frame, dtype = np.uint8 ))
         #ret, frame = cam.read()
