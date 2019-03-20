@@ -4,6 +4,7 @@ import numpy as np
 import argparse
 import imutils
 import cv2
+from math import cos, sin
 
 
 def find_body_part(mask, ratio_y, ratio_x):
@@ -65,30 +66,97 @@ def get_rectangle_score(thresh_image, p1, p2):
 
 def fit_torso(thresh_image, image, torso_orig, torso_width, torso_height):
     scale = 0.25
-    score_thresh = 0.8
+    score_thresh = 0.9
     max_score = 0
     max_area = 0
     best_t1 = (0, 0)
     best_t2 = (0, 0)
+    best_theta = 0
     for scale_hund in range(25, 150, 25):
-        scale = scale_hund/100
-        scaled_torso_height = int(scale * torso_height)
-        scaled_torso_width = int(scale * torso_width)
-        t1 = (torso_orig[0] - scaled_torso_width//2,
-              torso_orig[1]-scaled_torso_height//2)
-        t2 = (torso_orig[0] + scaled_torso_width//2,
-              torso_orig[1]+scaled_torso_height//2)
-        (area, score) = get_rectangle_score(thresh_image, t1, t2)
-        if score > score_thresh and area > max_area:
-            best_t1 = t1
-            best_t2 = t2
-            max_score = score
-            # for scale in range(0.25, 1.5, 0.25):
+        for theta in range(-40, 40, 5):
+            scale = scale_hund/100
+            scaled_torso_height = int(scale * torso_height)
+            scaled_torso_width = int(scale * torso_width)
+            t1 = (torso_orig[0] - scaled_torso_width//2,
+                  torso_orig[1]-scaled_torso_height//2)
+            t2 = (torso_orig[0] + scaled_torso_width//2,
+                  torso_orig[1]+scaled_torso_height//2)
+            rot_img = thresh_image.copy()
+            rot_img = rotate_image(
+                rot_img, (t1[0] + (t2[0]-t1[0])//2, t1[1]), theta)
+            (area, score) = get_rectangle_score(rot_img, t1, t2)
+            if score > score_thresh and area > max_area:
+
+                best_t1 = t1
+                best_t2 = t2
+                max_score = score
+                max_area = area
+                best_theta = theta
+                best_img = rot_img.copy()
+    print(max_score, max_area)
     thresh_color = thresh_image.copy()
     thresh_color = cv2.cvtColor(thresh_color, cv2.COLOR_GRAY2BGR)
-    cv2.rectangle(thresh_color, best_t1, best_t2, (255, 0, 0), 2)
-    cv2.imshow("thresh color", thresh_color)
-    return
+    best_img = cv2.cvtColor(best_img, cv2.COLOR_GRAY2BGR)
+    cv2.imshow('best image', best_img)
+    return rotate_rectangle(thresh_color, best_t1, best_t2, best_theta)
+
+    # cv2.rectangle(thresh_color, best_t1, best_t2, (255, 0, 0), 2)
+
+
+def rotate_image(image, rot_orig, angle):
+    rot_img = image.copy()
+    rot_mat = cv2.getRotationMatrix2D(rot_orig, angle, 1.0)
+    result = cv2.warpAffine(
+        rot_img, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
+    return result
+
+
+# def rotate_image(image, angle):
+#     if angle == 0:
+#         return image
+#     height, width = image.shape[:2]
+#     rot_mat = cv2.getRotationMatrix2D((width/2, height/2), angle, 0.9)
+#     result = cv2.warpAffine(
+#         image, rot_mat, (width, height), flags=cv2.INTER_LINEAR)
+#     return result
+
+
+def rotate_point(pos, orig, img, angle):
+    if angle == 0:
+        return pos
+    angle = np.radians(angle)
+    x = pos[0]
+    y = pos[1]
+    orig_x = orig[0]
+    orig_y = orig[1]
+
+    newx = cos(angle)*(x-orig_x) - sin(angle)*(y-orig_y)+orig_x
+    newy = sin(angle) * (x-orig_x) + cos(angle)*(y-orig_y) + orig_y
+
+    return int(newx), int(newy)
+
+
+def rotate_rectangle(image, t1, t2, theta):
+    x1 = t1[0]
+    y1 = t1[1]
+    x2 = t2[0]
+    y2 = t2[1]
+
+    origin = (x1 + (x2-x1)//2, y1)
+    new_t1 = rotate_point((x1, y1), origin, image, theta)
+    new_t2 = rotate_point((x2, y1), origin, image, theta)
+    new_t3 = rotate_point((x2, y2), origin, image, theta)
+    new_t4 = rotate_point((x1, y2), origin, image, theta)
+
+    return (new_t1, new_t2, new_t3, new_t4)
+
+
+def draw_rect(image, points):
+    (p1, p2, p3, p4) = points
+    cv2.line(image, p1, p2, (0, 0, 255), thickness=2)
+    cv2.line(image, p2, p3, (0, 0, 255), thickness=2)
+    cv2.line(image, p3, p4, (0, 0, 255), thickness=2)
+    cv2.line(image, p4, p1, (0, 0, 255), thickness=2)
 
 
 def main():
@@ -165,8 +233,11 @@ def main():
 
     torso_orig = (x+w//2, y+h + torso_height//2 + 50)
 
-    fit_torso(
+    (tp1, tp2, tp3, tp4) = fit_torso(
         upper_half, image, (torso_orig[0]-xA, torso_orig[1]-yA), torso_width, torso_height)
+
+    draw_rect(image, ((tp1[0]+xA, tp1[1]+yA), (tp2[0]+xA, tp2[1]+yA),
+                      (tp3[0]+xA, tp3[1]+yA), (tp4[0]+xA, tp4[1]+yA)))
 
     # show the original images with rectangles and the thresholded image
     cv2.imshow("mask", fgmask)
