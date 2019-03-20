@@ -25,61 +25,87 @@ def find_body_part(mask, ratio_y, ratio_x):
     return [bodyPart, [y, x]]
 
 
-# both MOG and MOG2 can be used, with different parameter values
-backgroundSubtractor = cv2.createBackgroundSubtractorMOG2(detectShadows=True)
+def find_face(image):
+    casc_path = "haarcascade_frontalface_default.xml"
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + casc_path)
+    img_cpy = image.copy()
 
-# apply the algorithm for background images using learning rate > 0
-for i in range(1, 16):
-    bgImageFile = "images/background.jpg"
-    bg = cv2.imread(bgImageFile)
-    backgroundSubtractor.apply(bg, learningRate=0.5)
+    gray_image = cv2.cvtColor(img_cpy, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(
+        gray_image,
+        scaleFactor=1.1,
+        minNeighbors=5
+    )
+    return faces[0]
 
-hog = cv2.HOGDescriptor()
-hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-image = cv2.imread('images/adrien.jpg')
-orig = image.copy()
-# detect people in the image
-(rects, weights) = hog.detectMultiScale(image, winStride=(4, 4),
-                                        padding=(8, 8), scale=1.05)
 
-# draw the original bounding boxes
-for (x, y, w, h) in rects:
-    cv2.rectangle(orig, (x, y), (x + w, y + h), (0, 0, 255), 2)
+def main():
 
-# apply non-maxima suppression to the bounding boxes using a
-# fairly large overlap threshold to try to maintain overlapping
-# boxes that are still people
-rects = np.array([[x, y, x + w, y + h] for (x, y, w, h) in rects])
-pick = non_max_suppression(rects, probs=None, overlapThresh=0.65)
+    # both MOG and MOG2 can be used, with different parameter values
+    backgroundSubtractor = cv2.createBackgroundSubtractorMOG2(
+        detectShadows=True)
 
-# draw the final bounding boxes
-max_area = 0
-max_rectangle = (0, 0, 0, 0)
-p1 = (0, 0)
-p2 = (0, 0)
-for (xA, yA, xB, yB) in pick:
-    area = (xB - xA) * (yB - yA)
-    if area > max_area:
-        p1 = (xA, yA)
-        p2 = (xB, (yA + 2*yB)//3)
-        max_area = area
-cv2.rectangle(image, p1, p2, (0, 255, 0), 2)
-# apply the algorithm for detection image using learning rate 0
-stillFrame = cv2.imread("images/adrien.jpg")
-fgmask = backgroundSubtractor.apply(stillFrame, learningRate=0)
-ret, fgmask = cv2.threshold(fgmask, 127, 255, cv2.THRESH_BINARY)
-upper_half = fgmask[p1[1]:p2[1], p1[0]:p2[0]]
+    # apply the algorithm for background images using learning rate > 0
+    for i in range(1, 16):
+        bgImageFile = "images/background.jpg"
+        bg = cv2.imread(bgImageFile)
+        backgroundSubtractor.apply(bg, learningRate=0.5)
 
-torso, coor = find_body_part(upper_half, 2, 2)
-(xA, yA) = p1
-(xB, yB) = p2
-cv2.rectangle(stillFrame, (xA + coor[1] - torso.shape[1], yA + coor[0] -
-                           torso.shape[0]), (xA + coor[1], yA + coor[0]), (0, 255, 0), 2)
+    hog = cv2.HOGDescriptor()
+    hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+    image = cv2.imread('images/adrien.jpg')
+    orig = image.copy()
 
-# show both images
-cv2.imshow("AfterNMS", image)
-cv2.imshow("original", stillFrame)
-cv2.imshow("mask", fgmask)
-cv2.imshow("Upper half", upper_half)
-cv2.waitKey()
-cv2.destroyAllWindows()
+    # detect people in the image
+    (rects, weights) = hog.detectMultiScale(image, winStride=(4, 4),
+                                            padding=(8, 8), scale=1.05)
+    rects = np.array([[x, y, x + w, y + h] for (x, y, w, h) in rects])
+    pick = non_max_suppression(rects, probs=None, overlapThresh=0.65)
+
+    # get the largest person detected
+    max_area = 0
+    max_rectangle = (0, 0, 0, 0)
+    p1 = (0, 0)
+    p2 = (0, 0)
+    for (xA, yA, xB, yB) in pick:
+        area = (xB - xA) * (yB - yA)
+        if area > max_area:
+            p1 = (xA, yA)
+            p2 = (xB, (yA + 2*yB)//3)
+            max_area = area
+    cv2.rectangle(image, p1, p2, (0, 255, 0), 2)
+
+    # going to threshold using background subtraction
+    stillFrame = cv2.imread("images/adrien.jpg")
+    fgmask = backgroundSubtractor.apply(stillFrame, learningRate=0)
+    ret, fgmask = cv2.threshold(fgmask, 127, 255, cv2.THRESH_BINARY)
+
+    # take a portion of the thresholded image
+    # based on the bounding box that we got from the HOOG
+    upper_half = fgmask[p1[1]:p2[1], p1[0]:p2[0]]
+
+    # now we will find the torso
+    torso, coor = find_body_part(upper_half, 2, 2)
+    (xA, yA) = p1
+    (xB, yB) = p2
+    cv2.rectangle(stillFrame, (xA + coor[1] - torso.shape[1], yA + coor[0] -
+                               torso.shape[0]), (xA + coor[1], yA + coor[0]), (0, 255, 0), 2)
+
+    # finding the face
+    # this should probably be done before the torso, than have the torso position linked to
+    # the position of the face
+    (x, y, w, h) = find_face(image)
+    face_points = ((x, y), (x+w, y+h))
+    # draw the face rectangle
+    cv2.rectangle(stillFrame, face_points[0], face_points[1], (0, 255, 0), 2)
+
+    # show the original images with rectangles and the thresholded image
+    cv2.imshow("mask", fgmask)
+    cv2.imshow("upper half", upper_half)
+    cv2.imshow("Boxes", stillFrame)
+    cv2.waitKey()
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()
