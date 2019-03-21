@@ -42,7 +42,7 @@ def find_face(image):
     eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + eye_casc)
     (x, y, w, h) = faces[0]
     roi_gray = gray_image[y:y+h, x:x+w]
-    roi_color = image[y:y+h, x:x+w]
+    face_image = image[y:y+h, x:x+w]
     eyes = eye_cascade.detectMultiScale(roi_gray)
     if len(eyes) >= 2:
         print("eyes!")
@@ -51,7 +51,7 @@ def find_face(image):
         (ex2, ey2, ew2, eh2) = eyes[1]
         p1 = (ex1 + ew1//2, ey1 + eh1//2)
         p2 = (ex2 + ew2//2, ey2 + eh2//2)
-        cv2.line(roi_color, p1, p2, (0, 0, 255), 2)
+        cv2.line(face_image, p1, p2, (0, 0, 255), 2)
 
     cv2.imshow("other image", image)
     return faces[0]
@@ -158,29 +158,37 @@ def draw_rect(image, points):
     cv2.line(image, p3, p4, (0, 0, 255), thickness=2)
     cv2.line(image, p4, p1, (0, 0, 255), thickness=2)
 
+# To remove section specified from image
+def removeSection(to_remove, image):
+    (x,y,w,h) = to_remove
+    mask = np.uint8(np.full(image.shape[:2],255))
+    mask[y:y+h,x:x+w] = 0
+    return cv2.bitwise_and(image, image, mask = mask)
+
 
 def main():
 
     set_width = 1500
     # both MOG and MOG2 can be used, with different parameter values
-    backgroundSubtractor = cv2.createBackgroundSubtractorMOG2(
-        detectShadows=True)
+    backgroundSubtractor = cv2.createBackgroundSubtractorMOG2(detectShadows=True)
     person_image = "images/adrien.jpg"
     # apply the algorithm for background images using learning rate > 0
     bgImageFile = "images/background.jpg"
     bg = cv2.imread(bgImageFile)
     bg = resize(bg, width=set_width)
+
+    # applying background subtraction
     for i in range(1, 16):
         backgroundSubtractor.apply(bg, learningRate=0.5)
 
+    # creating HOG
     hog = cv2.HOGDescriptor()
     hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
     image = cv2.imread(person_image)
     image = resize(image, width=set_width)
 
     # detect people in the image
-    (rects, weights) = hog.detectMultiScale(image, winStride=(4, 4),
-                                            padding=(8, 8), scale=1.05)
+    (rects, weights) = hog.detectMultiScale(image, winStride=(4, 4), padding=(8, 8), scale=1.05)
     rects = np.array([[x, y, x + w, y + h] for (x, y, w, h) in rects])
     pick = non_max_suppression(rects, probs=None, overlapThresh=0.65)
 
@@ -195,6 +203,7 @@ def main():
             p1 = (xA, yA)
             p2 = (xB, (yA + 2*yB)//3)
             max_area = area
+
     cv2.rectangle(image, p1, p2, (0, 255, 0), 2)
 
     # going to threshold using background subtraction
@@ -204,10 +213,6 @@ def main():
 
     kernel = np.ones((11, 11), np.uint8)
     fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, kernel)
-
-    # take a portion of the thresholded image
-    # based on the bounding box that we got from the HOOG
-    upper_half = fgmask[p1[1]:p2[1], p1[0]:p2[0]]
 
     # finding the face
     # this should probably be done before the torso, than have the torso position linked to
@@ -221,6 +226,14 @@ def main():
     # torso, coor = find_body_part(upper_half, 2, 2)
     (xA, yA) = p1
     (xB, yB) = p2
+
+    # remove face from fgmask
+    #fgmask = removeSection((x, y, w, h), fgmask)
+
+    # take a portion of the thresholded image
+    # based on the bounding box that we got from the HOOG and top of face
+    upper_half = fgmask[p1[1]:p2[1], p1[0]:p2[0]]
+
     # cv2.rectangle(image, (xA + coor[1] - torso.shape[1], yA + coor[0] -
     #                       torso.shape[0]), (xA + coor[1], yA + coor[0]), (0, 255, 0), 2)
 
@@ -233,11 +246,18 @@ def main():
 
     torso_orig = (x+w//2, y+h + torso_height//2 + 50)
 
-    (tp1, tp2, tp3, tp4) = fit_torso(
-        upper_half, image, (torso_orig[0]-xA, torso_orig[1]-yA), torso_width, torso_height)
+    (tp1, tp2, tp3, tp4) = fit_torso(upper_half, image, (torso_orig[0]-xA, torso_orig[1]-yA), torso_width, torso_height)
 
-    draw_rect(image, ((tp1[0]+xA, tp1[1]+yA), (tp2[0]+xA, tp2[1]+yA),
-                      (tp3[0]+xA, tp3[1]+yA), (tp4[0]+xA, tp4[1]+yA)))
+    # remove torso and face from upper_half 
+    upper_half = removeSection( ( tp1[0], 0, tp2[1], tp2[0] + tp1[1] ) , upper_half)
+
+    # define shoulder and leg points
+    #shoulder_left_pt = ( tp1[0], tp1[1] )
+    #shoulder_right_pt = ( tp1[0] + tp1[1], tp1[1] )
+    #image[tp1[1]+yA, tp1[0]+xA] = [255,255,255]
+   # image[tp1[1] +yA, tp1[0] + tp1[1]+xA] = [255,255,255]
+
+    draw_rect(image, ((tp1[0]+xA, tp1[1]+yA), (tp2[0]+xA, tp2[1]+yA), (tp3[0]+xA, tp3[1]+yA), (tp4[0]+xA, tp4[1]+yA)))
 
     # show the original images with rectangles and the thresholded image
     cv2.imshow("mask", fgmask)
