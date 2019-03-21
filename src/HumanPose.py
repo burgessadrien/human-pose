@@ -4,7 +4,7 @@ import numpy as np
 import argparse
 import imutils
 import cv2
-from math import cos, sin
+from math import cos, sin, atan
 
 
 def find_body_part(mask, ratio_y, ratio_x):
@@ -25,6 +25,11 @@ def find_body_part(mask, ratio_y, ratio_x):
     bodyPart = mask[(y - height):y, (x - width):x]
     return [bodyPart, [y, x]]
 
+# pt2 x > pt1 x
+def find_angle(pt1, pt2):
+    width = pt2[0] - pt1[0]
+    height = pt2[1] - pt1[1]
+    return  atan(height / width)
 
 def find_face(image):
     head_casc = "haarcascade_frontalface_default.xml"
@@ -44,6 +49,7 @@ def find_face(image):
     roi_gray = gray_image[y:y+h, x:x+w]
     face_image = image[y:y+h, x:x+w]
     eyes = eye_cascade.detectMultiScale(roi_gray)
+    theta = 0
     if len(eyes) >= 2:
         print("eyes!")
         eyes = eyes[0:2]
@@ -52,19 +58,20 @@ def find_face(image):
         p1 = (ex1 + ew1//2, ey1 + eh1//2)
         p2 = (ex2 + ew2//2, ey2 + eh2//2)
         cv2.line(face_image, p1, p2, (0, 0, 255), 2)
+        theta = find_angle(p1,p2)
 
     cv2.imshow("other image", image)
-    return faces[0]
+    return faces[0], theta
 
 
-def get_rectangle_score(thresh_image, p1, p2):
-    rectangle = thresh_image[p1[1]:p2[1], p1[0]:p2[0]]
+def get_rectangle_score(image, p1, p2):
+    rectangle = image[p1[1]:p2[1], p1[0]:p2[0]]
     non_zero_sum = cv2.countNonZero(rectangle)
     area = (p2[0] - p1[0])*(p2[1]-p1[1])
     return (area, non_zero_sum/area)
 
 
-def fit_torso(thresh_image, image, torso_orig, torso_width, torso_height):
+def fit_torso(thresh_image, torso_orig, torso_width, torso_height):
     scale = 0.25
     score_thresh = 0.9
     max_score = 0
@@ -72,56 +79,96 @@ def fit_torso(thresh_image, image, torso_orig, torso_width, torso_height):
     best_t1 = (0, 0)
     best_t2 = (0, 0)
     best_theta = 0
+    best_img = thresh_image
+    best_rotate_orig = (0,0)
     for scale_hund in range(25, 150, 25):
         for theta in range(-40, 40, 5):
             scale = scale_hund/100
             scaled_torso_height = int(scale * torso_height)
             scaled_torso_width = int(scale * torso_width)
-            t1 = (torso_orig[0] - scaled_torso_width//2,
-                  torso_orig[1]-scaled_torso_height//2)
-            t2 = (torso_orig[0] + scaled_torso_width//2,
-                  torso_orig[1]+scaled_torso_height//2)
-            rot_img = thresh_image.copy()
-            rot_img = rotate_image(
-                rot_img, (t1[0] + (t2[0]-t1[0])//2, t1[1]), theta)
-            (area, score) = get_rectangle_score(rot_img, t1, t2)
-            if score > score_thresh and area > max_area:
+            
+            # t1: top left, t2: bottom right
+            t1 = (torso_orig[0] - scaled_torso_width//2, torso_orig[1]-scaled_torso_height//2)
+            t2 = (torso_orig[0] + scaled_torso_width//2, torso_orig[1]+scaled_torso_height//2)
+            rotate_orig = (t1[0] + (t2[0]-t1[0])//2, t1[1])
 
+            rot_img = thresh_image.copy()
+            rot_img = rotate_image(rot_img, rotate_orig, theta)
+            (area, score) = get_rectangle_score(rot_img, t1, t2)
+
+            if score > score_thresh and area > max_area:
                 best_t1 = t1
                 best_t2 = t2
                 max_score = score
                 max_area = area
                 best_theta = theta
+                best_rotate_orig = rotate_orig
                 best_img = rot_img.copy()
+
     print(max_score, max_area)
     thresh_color = thresh_image.copy()
     thresh_color = cv2.cvtColor(thresh_color, cv2.COLOR_GRAY2BGR)
     best_img = cv2.cvtColor(best_img, cv2.COLOR_GRAY2BGR)
-    cv2.imshow('best image', best_img)
-    return rotate_rectangle(thresh_color, best_t1, best_t2, best_theta)
+    best_t = rotate_rectangle(best_t1, best_t2, best_theta)
+    return (best_t, best_theta, best_rotate_orig)
 
-    # cv2.rectangle(thresh_color, best_t1, best_t2, (255, 0, 0), 2)
+def fit_limb(thresh_image, limb_orig, limb_side, limb_width, limb_height):
+    scale = 0.25
+    score_thresh = 0.8
+    max_score = 0
+    max_area = 0
+    best_t1 = (0, 0)
+    best_t2 = (0, 0)
+    best_theta = 0
+    best_img = thresh_image
+    if limb_side == "left":
+        limb_width = -limb_width
+        theta_iter = -1 
+        theta_end = -270
+    else:
+        theta_iter = 1
+        theta_end = 270
 
+
+    for scale_hund in range(25, 150, 25):
+        for theta in range(-90, theta_end, theta_iter):
+            scale = scale_hund/100
+            scaled_limb_height = int(scale * limb_height)
+            scaled_limb_width = int(scale * limb_width)
+            
+            # t1: top left, t2: bottom right
+            t1 = limb_orig
+            t2 = (limb_orig[0] + scaled_limb_width, limb_orig[1]+scaled_limb_height)
+            rotate_orig = t1
+            rot_img = thresh_image.copy()
+            rot_img = rotate_image(rot_img, rotate_orig, theta)
+            (area, score) = get_rectangle_score(rot_img, t1, t2)
+            cv2.rectangle(rot_img, t1, t2, 150)
+            if score > score_thresh and area > max_area:
+                best_t1 = t1
+                best_t2 = t2
+                max_score = score
+                max_area = area
+                best_theta = theta
+                best_img = rotate_image(rot_img, rotate_orig, -theta).copy()
+
+    print(max_score, max_area)
+    thresh_color = thresh_image.copy()
+    thresh_color = cv2.cvtColor(thresh_color, cv2.COLOR_GRAY2BGR)
+    best_img = cv2.cvtColor(best_img, cv2.COLOR_GRAY2BGR)
+    cv2.imshow("best image", best_img)
+    best_t = rotate_rectangle(best_t1, best_t2, best_theta)
+    return (best_t, best_theta)
+    
 
 def rotate_image(image, rot_orig, angle):
     rot_img = image.copy()
     rot_mat = cv2.getRotationMatrix2D(rot_orig, angle, 1.0)
-    result = cv2.warpAffine(
-        rot_img, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
+    result = cv2.warpAffine( rot_img, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
     return result
 
 
-# def rotate_image(image, angle):
-#     if angle == 0:
-#         return image
-#     height, width = image.shape[:2]
-#     rot_mat = cv2.getRotationMatrix2D((width/2, height/2), angle, 0.9)
-#     result = cv2.warpAffine(
-#         image, rot_mat, (width, height), flags=cv2.INTER_LINEAR)
-#     return result
-
-
-def rotate_point(pos, orig, img, angle):
+def rotate_point(pos, orig, angle):
     if angle == 0:
         return pos
     angle = np.radians(angle)
@@ -136,17 +183,22 @@ def rotate_point(pos, orig, img, angle):
     return int(newx), int(newy)
 
 
-def rotate_rectangle(image, t1, t2, theta):
+def rotate_rectangle(t1, t2, theta):
     x1 = t1[0]
     y1 = t1[1]
     x2 = t2[0]
     y2 = t2[1]
 
     origin = (x1 + (x2-x1)//2, y1)
-    new_t1 = rotate_point((x1, y1), origin, image, theta)
-    new_t2 = rotate_point((x2, y1), origin, image, theta)
-    new_t3 = rotate_point((x2, y2), origin, image, theta)
-    new_t4 = rotate_point((x1, y2), origin, image, theta)
+
+    # top left
+    new_t1 = rotate_point((x1, y1), origin, theta)
+    # top right
+    new_t2 = rotate_point((x2, y1), origin, theta)
+    # bottom right
+    new_t3 = rotate_point((x2, y2), origin, theta)
+    # bottom left
+    new_t4 = rotate_point((x1, y2), origin, theta)
 
     return (new_t1, new_t2, new_t3, new_t4)
 
@@ -159,11 +211,17 @@ def draw_rect(image, points):
     cv2.line(image, p4, p1, (0, 0, 255), thickness=2)
 
 # To remove section specified from image
-def removeSection(to_remove, image):
-    (x,y,w,h) = to_remove
-    mask = np.uint8(np.full(image.shape[:2],255))
-    mask[y:y+h,x:x+w] = 0
-    return cv2.bitwise_and(image, image, mask = mask)
+def remove_section(rectangle, thresh_image, theta, rotate_orig):
+    t1,t2,t3,t4 = rectangle
+    new_t1 = rotate_point(t1,rotate_orig, theta)
+    new_t2 = rotate_point(t2,rotate_orig, theta)
+    new_t3 = rotate_point(t3,rotate_orig, theta)
+    new_t4 = rotate_point(t4,rotate_orig, theta)
+    mask = np.uint8(np.full(thresh_image.shape[:2],255))
+    rotate_mask = rotate_image(mask, rotate_orig, theta)
+    cv2.rectangle(rotate_mask, new_t1, new_t3, 0, thickness=-1)
+    mask = rotate_image(rotate_mask, rotate_orig, -theta)
+    return cv2.bitwise_and(thresh_image, thresh_image, mask = mask)
 
 
 def main():
@@ -201,7 +259,7 @@ def main():
         area = (xB - xA) * (yB - yA)
         if area > max_area:
             p1 = (xA, yA)
-            p2 = (xB, (yA + 2*yB)//3)
+            p2 = (xB, (yA + yB))
             max_area = area
 
     cv2.rectangle(image, p1, p2, (0, 255, 0), 2)
@@ -209,7 +267,7 @@ def main():
     # going to threshold using background subtraction
     # image = cv2.imread(person_image)
     fgmask = backgroundSubtractor.apply(image, learningRate=0)
-    ret, fgmask = cv2.threshold(fgmask, 127, 255, cv2.THRESH_BINARY)
+    ret, fgmask = cv2.threshold(fgmask, 200, 255, cv2.THRESH_BINARY)
 
     kernel = np.ones((11, 11), np.uint8)
     fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, kernel)
@@ -217,10 +275,13 @@ def main():
     # finding the face
     # this should probably be done before the torso, than have the torso position linked to
     # the position of the face
-    (x, y, w, h) = find_face(image)
+    (x, y, w, h), face_theta = find_face(image)
     face_points = ((x, y), (x+w, y+h))
     face_h = h
     face_w = w
+    remove_face = (( x, y), ( x+w, y), ( x+w,y+h ), ( x,y+h ))
+    face_orig = (x + w//2, y + h//2)
+    fgmask = remove_section(remove_face, fgmask, face_theta, face_orig)
 
     # # now we will find the torso
     # torso, coor = find_body_part(upper_half, 2, 2)
@@ -228,7 +289,7 @@ def main():
     (xB, yB) = p2
 
     # remove face from fgmask
-    #fgmask = removeSection((x, y, w, h), fgmask)
+    #sfgmask = remove_section((x, y, w, h), fgmask)
 
     # take a portion of the thresholded image
     # based on the bounding box that we got from the HOOG and top of face
@@ -245,19 +306,23 @@ def main():
     torso_height = int(2.5*face_h)
 
     torso_orig = (x+w//2, y+h + torso_height//2 + 50)
+    (tp1, tp2, tp3, tp4), torso_theta, torso_orig = fit_torso(upper_half, (torso_orig[0]-xA, torso_orig[1]-yA), torso_width, torso_height)
 
-    (tp1, tp2, tp3, tp4) = fit_torso(upper_half, image, (torso_orig[0]-xA, torso_orig[1]-yA), torso_width, torso_height)
-
-    # remove torso and face from upper_half 
-    upper_half = removeSection( ( tp1[0], 0, tp2[1], tp2[0] + tp1[1] ) , upper_half)
-
-    # define shoulder and leg points
-    #shoulder_left_pt = ( tp1[0], tp1[1] )
-    #shoulder_right_pt = ( tp1[0] + tp1[1], tp1[1] )
-    #image[tp1[1]+yA, tp1[0]+xA] = [255,255,255]
-   # image[tp1[1] +yA, tp1[0] + tp1[1]+xA] = [255,255,255]
+    # remove torso from upper_half 
+    #upper_half = remove_section( (tp1, tp2, tp3, tp4) , upper_half, torso_theta, torso_orig )
 
     draw_rect(image, ((tp1[0]+xA, tp1[1]+yA), (tp2[0]+xA, tp2[1]+yA), (tp3[0]+xA, tp3[1]+yA), (tp4[0]+xA, tp4[1]+yA)))
+
+    # define shoulder and leg points
+    shoulder_left_pt = tp1
+    shoulder_right_pt = tp2
+    thigh_left = tp4
+    thigh_right = tp3
+
+    (uar1,uar2,uar3,uar4), uar_theta = fit_limb(upper_half, shoulder_right_pt, "right", int(face_h*1.5), face_h//2)
+
+    draw_rect(image, ( (uar1[0]+xA, uar1[1]+y), (uar2[0]+xA, uar2[1]+y), (uar3[0]+xA, uar3[1]+y), (uar4[0]+xA, uar4[1]+y) ) )
+
 
     # show the original images with rectangles and the thresholded image
     cv2.imshow("mask", fgmask)
@@ -269,3 +334,12 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Body Part Approximations:
+
+# head:         width:          height: 1 head
+# torso:        width:          height: 3 heads
+# upper arm:    width:          height: 1 heads
+# lower arms:   width:          height: 1.5 heads
+# upper leg:    width:          height: 2 heads
+# lower leg:    width:          height: 2 heads
