@@ -139,7 +139,7 @@ def fit_limb(thresh_image, limb_orig, limb_width, limb_height, limb_side, theta_
     best_theta = 0
     best_img = thresh_image
 
-    for scale_hund in range(25, 150, 25):
+    for scale_hund in range(75, 165, 15):
         for theta in range(theta_begin, theta_end, theta_iter):
             scale = scale_hund/100
             scaled_limb_height = int(scale * limb_height)
@@ -149,9 +149,13 @@ def fit_limb(thresh_image, limb_orig, limb_width, limb_height, limb_side, theta_
             t1 = limb_orig
             if limb_side == "left":
                 t2 = (limb_orig[0] + scaled_limb_width, limb_orig[1]+scaled_limb_height)
-            else:
+            elif limb_side == "right":
                 t2 = (limb_orig[0] + scaled_limb_width, limb_orig[1]-scaled_limb_height)
-            rotate_orig = t1
+            else:
+                t1 = (limb_orig[0] - scaled_limb_width//2, limb_orig[1])
+                t2 = (limb_orig[0] + scaled_limb_width//2, limb_orig[1]+scaled_limb_height)
+
+            rotate_orig = limb_orig
             rot_img = thresh_image.copy()
             rot_img = rotate_image(rot_img, rotate_orig, theta)
             (area, score) = get_rectangle_score(rot_img, t1, t2)
@@ -238,8 +242,7 @@ def remove_section(rectangle, thresh_image, theta, rotate_orig):
     return cv2.bitwise_and(thresh_image, thresh_image, mask = mask)
 
 def find_midway(p1,p2):
-    angle = find_angle(p1,p2)
-    print(angle)
+    return (int((p1[0]+p2[0])/2), int((p1[1]+p2[1])/2))
 
 def main():
 
@@ -325,9 +328,6 @@ def main():
     torso_orig = (x+w//2, y+h + torso_height//2 + 50)
     (tp1, tp2, tp3, tp4), torso_theta, torso_orig = fit_torso(upper_half, (torso_orig[0]-xA, torso_orig[1]-yA), torso_width, torso_height)
 
-    # remove torso from upper_half 
-    #upper_half = remove_section( (tp1, tp2, tp3, tp4) , upper_half, torso_theta, torso_orig )
-
     draw_rect(image, ((tp1[0]+xA, tp1[1]+yA), (tp2[0]+xA, tp2[1]+yA), (tp3[0]+xA, tp3[1]+yA), (tp4[0]+xA, tp4[1]+yA)))
 
     # define shoulder and leg points
@@ -346,13 +346,27 @@ def main():
 
 
     # identify right leg of person
-    (ulr1,ulr2,ulr3,ulr4), ulr_theta = fit_limb(upper_half, thigh_right_pt, int(face_h*1.5), int(face_h//2), "left", 0, 100, 1)
+    (ulr1,ulr2,ulr3,ulr4), ulr_theta = fit_limb(upper_half, thigh_right_pt, int(face_h*1.5), int(face_h//2), "left", 0, 110, 5)
     draw_rect(image, ( (ulr1[0]+xA, ulr1[1]+yA), (ulr2[0]+xA, ulr2[1]+yA), (ulr3[0]+xA, ulr3[1]+yA), (ulr4[0]+xA, ulr4[1]+yA) ) )
 
     # identify left leg of person
-    (ull1,ull2,ull3,ull4), ull_theta = fit_limb(upper_half, thigh_left_pt, int(face_h*1.5), int(face_h//2), "right", -180, -280, -1)
+    (ull1,ull2,ull3,ull4), ull_theta = fit_limb(upper_half, thigh_left_pt, int(face_h*1.5), int(face_h//2), "right", -180, -280, -5)
     draw_rect(image, ( (ull1[0]+xA, ull1[1]+yA), (ull2[0]+xA, ull2[1]+yA), (ull3[0]+xA, ull3[1]+yA), (ull4[0]+xA, ull4[1]+yA) ) )
     
+    # remove torso from upper_half 
+    #upper_right = remove_section( (tp1, tp2, tp3, tp4) , upper_half, torso_theta, torso_orig )
+    #upper_right = remove_section( (uar1,uar2,uar3,uar4) , upper_half, uar_theta, shoulder_right_pt )
+    #upper_left = remove_section( (ual1,ual2,ual3,ual4) , upper_half, ual_theta, shoulder_left_pt )
+
+    # identifying right lower arm
+    #forearm_right_pt = find_midway(uar3,uar2)
+   # (lar1,lar2,lar3,lar4), uar_theta = fit_limb(upper_half, forearm_right_pt, int(face_h//2), face_h, "center", 180, -180, -5)
+    #draw_rect(image, ( (lar1[0]+xA, lar1[1]+yA), (lar2[0]+xA, lar2[1]+yA), (lar3[0]+xA, lar3[1]+yA), (lar4[0]+xA, lar4[1]+yA) ) )
+
+    # identifying left lower arm
+   # forearm_left_pt = find_midway(ual3,ual2)
+    #(lal1,lal2,lal3,lal4), ual_theta = fit_limb(upper_half, forearm_left_pt, int(face_h//2), face_h, "center", -180, 180, 5)
+    #draw_rect(image, ( (lal1[0]+xA, lal1[1]+yA), (lal2[0]+xA, lal2[1]+yA), (lal3[0]+xA, lal3[1]+yA), (lal4[0]+xA, lal4[1]+yA) ) )
 
 
     # show the original images with rectangles and the thresholded image
