@@ -228,14 +228,15 @@ def remove_section(rectangle, thresh_image, theta, rotate_orig):
 def find_midway(p1,p2):
     return (int((p1[0]+p2[0])/2), int((p1[1]+p2[1])/2))
 
+
 def main():
 
     set_width = 1500
     # both MOG and MOG2 can be used, with different parameter values
     backgroundSubtractor = cv2.createBackgroundSubtractorMOG2(detectShadows=True)
-    person_image = "images/just_john/john2.jpg"
+    person_image = "images/adrien2.jpg"
     # apply the algorithm for background images using learning rate > 0
-    bgImageFile = "images/just_john/bg.jpg"
+    bgImageFile = "images/background.jpg"
     bg = cv2.imread(bgImageFile)
     bg = resize(bg, width=set_width)
 
@@ -278,8 +279,6 @@ def main():
     kernel_close = np.ones((35,35), np.uint8)
     fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_CLOSE, kernel)
 
-    cv2.imshow("masked image", fgmask)
-
     # finding the face
     # this should probably be done before the torso, than have the torso position linked to
     # the position of the face
@@ -295,9 +294,6 @@ def main():
     # torso, coor = find_body_part(upper_half, 2, 2)
     (xA, yA) = p1
     (xB, yB) = p2
-
-    # remove face from fgmask
-    #sfgmask = remove_section((x, y, w, h), fgmask)
 
     # take a portion of the thresholded image
     # based on the bounding box that we got from the HOOG and top of face
@@ -349,7 +345,7 @@ def main():
     upper_thigh_left = remove_section( (ull1,ull2,ull3,ull4) , no_torso, ull_theta, thigh_left_pt )
 
 
-    cv2.imshow("arm right", upper_arm_right)
+    #cv2.imshow("arm right", upper_arm_right)
     #cv2.imshow("arm left", upper_arm_left)
     #cv2.imshow("leg left", upper_thigh_left)
     #cv2.imshow("leg right", upper_thigh_right)
@@ -378,7 +374,13 @@ def main():
     # show the original images with rectangles and the thresholded image
     # cv2.imshow("mask", fgmask)
     # cv2.imshow("upper half", human)
+
+    head_body_angle = abs(face_theta - torso_theta)
+    print(face_theta)
+    print(torso_theta)
     image = resize(image, height=720)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(image,'Head to body angle: ' + str(head_body_angle),(10,image.shape[0] - 20), font, 1,(255,255,255),2,cv2.LINE_AA)
     cv2.imshow("Boxes", image)
     cv2.waitKey()
     cv2.destroyAllWindows()
