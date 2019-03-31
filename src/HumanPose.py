@@ -224,16 +224,30 @@ def draw_rect(image, points):
 def remove_section(rectangle, thresh_image, theta, rotate_orig):
     t1,t2,t3,t4 = rectangle
     mask = np.uint8(np.full(thresh_image.shape[:2],255))
+    mask = np.uint8( np.pad(mask, pad_width=thresh_image.shape[1]//2, mode='constant', constant_values=255) ) 
+    rotate_orig = (rotate_orig[0] + thresh_image.shape[1]//2, rotate_orig[1] + thresh_image.shape[1]//2)
+
+    t1 = (t1[0] + mask.shape[1]//2, t1[1] + mask.shape[1]//2)
+    t2 = (t2[0] + mask.shape[1]//2, t2[1] + mask.shape[1]//2)
+    t3 = (t3[0] + mask.shape[1]//2, t3[1] + mask.shape[1]//2)
+    t4 = (t4[0] + mask.shape[1]//2, t4[1] + mask.shape[1]//2)
+
     new_t1 = rotate_point(t1,rotate_orig, theta)
     new_t2 = rotate_point(t2,rotate_orig, theta)
     new_t3 = rotate_point(t3,rotate_orig, theta)
     new_t4 = rotate_point(t4,rotate_orig, theta)
     
     rotate_mask = rotate_image(mask, rotate_orig, -theta)
-    cv2.imshow("rotated image", rotate_mask)
     cv2.rectangle(rotate_mask, new_t1, new_t3, 0, thickness=-1)
     mask = rotate_image(rotate_mask, rotate_orig, theta)
-    cv2.imshow("final mask", mask)
+    row_end = mask.shape[0] - int(thresh_image.shape[1]/2)
+    col_end = mask.shape[1] - int(thresh_image.shape[1]/2)
+    print(row_end)
+    print(col_end)
+    mask = mask[ int(thresh_image.shape[1]/2):row_end , int(thresh_image.shape[1]/2):col_end]
+
+    cv2.imshow("padded limb", mask)
+    print(thresh_image.shape)
     return cv2.bitwise_and(thresh_image, thresh_image, mask = mask)
 
 def find_midway(p1,p2):
@@ -308,7 +322,7 @@ def main():
 
     # take a portion of the thresholded image
     # based on the bounding box that we got from the HOOG and top of face
-    upper_half = fgmask[p1[1]:p2[1], p1[0]:p2[0]]
+    human = fgmask[p1[1]:p2[1], p1[0]:p2[0]]
 
     # cv2.rectangle(image, (xA + coor[1] - torso.shape[1], yA + coor[0] -
     #                       torso.shape[0]), (xA + coor[1], yA + coor[0]), (0, 255, 0), 2)
@@ -321,7 +335,7 @@ def main():
     torso_height = int(2.5*face_h)
 
     torso_orig = (x+w//2, y+h + torso_height//2 + 50)
-    (tp1, tp2, tp3, tp4), torso_theta, torso_orig = fit_torso(upper_half, (torso_orig[0]-xA, torso_orig[1]-yA), torso_width, torso_height)
+    (tp1, tp2, tp3, tp4), torso_theta, torso_orig = fit_torso(human, (torso_orig[0]-xA, torso_orig[1]-yA), torso_width, torso_height)
 
     draw_rect(image, ((tp1[0]+xA, tp1[1]+yA), (tp2[0]+xA, tp2[1]+yA), (tp3[0]+xA, tp3[1]+yA), (tp4[0]+xA, tp4[1]+yA)))
 
@@ -332,37 +346,41 @@ def main():
     thigh_right_pt = tp3
 
     # Identify right arm of person
-    (uar1,uar2,uar3,uar4), uar_theta = fit_limb(upper_half, shoulder_right_pt, int(face_h*1.1), face_h//2, "right", -90, -270, -5)
+    (uar1,uar2,uar3,uar4), uar_theta = fit_limb(human, shoulder_right_pt, int(face_h*1.1), face_h//2, "right", -90, -270, -5)
     draw_rect(image, ( (uar1[0]+xA, uar1[1]+yA), (uar2[0]+xA, uar2[1]+yA), (uar3[0]+xA, uar3[1]+yA), (uar4[0]+xA, uar4[1]+yA) ) )
 
     # identify left arm of person
-    (ual1,ual2,ual3,ual4), ual_theta = fit_limb(upper_half, shoulder_left_pt, int(face_h*1.1), face_h//2, "left", -90, 90, 5)
+    (ual1,ual2,ual3,ual4), ual_theta = fit_limb(human, shoulder_left_pt, int(face_h*1.1), face_h//2, "left", -90, 90, 5)
     draw_rect(image, ( (ual1[0]+xA, ual1[1]+yA), (ual2[0]+xA, ual2[1]+yA), (ual3[0]+xA, ual3[1]+yA), (ual4[0]+xA, ual4[1]+yA) ) )
 
 
     # identify right leg of person
-    (ulr1,ulr2,ulr3,ulr4), ulr_theta = fit_limb(upper_half, thigh_right_pt, int(face_h*1.5), int(face_h//2), "left", 0, 110, 5)
+    (ulr1,ulr2,ulr3,ulr4), ulr_theta = fit_limb(human, thigh_right_pt, int(face_h*1.5), int(face_h//2), "left", 0, 110, 5)
     draw_rect(image, ( (ulr1[0]+xA, ulr1[1]+yA), (ulr2[0]+xA, ulr2[1]+yA), (ulr3[0]+xA, ulr3[1]+yA), (ulr4[0]+xA, ulr4[1]+yA) ) )
 
     # identify left leg of person
-    (ull1,ull2,ull3,ull4), ull_theta = fit_limb(upper_half, thigh_left_pt, int(face_h*1.5), int(face_h//2), "right", -180, -290, -5)
+    (ull1,ull2,ull3,ull4), ull_theta = fit_limb(human, thigh_left_pt, int(face_h*1.5), int(face_h//2), "right", -180, -290, -5)
     draw_rect(image, ( (ull1[0]+xA, ull1[1]+yA), (ull2[0]+xA, ull2[1]+yA), (ull3[0]+xA, ull3[1]+yA), (ull4[0]+xA, ull4[1]+yA) ) )
     
     # remove torso from upper_half 
     print(torso_theta)
 
-    no_torso = remove_section( (tp1, tp2, tp3, tp4) , upper_half, torso_theta, torso_orig )
+    no_torso = remove_section( (tp1, tp2, tp3, tp4) , human, torso_theta, torso_orig )
     upper_arm_right = remove_section( (uar1,uar2,uar3,uar4) , no_torso, uar_theta, shoulder_right_pt )
-    upper_arm_left = remove_section( (ual1,ual2,ual3,ual4) , no_torso, ual_theta, shoulder_left_pt )
-    upper_thigh_right = remove_section( (ulr1,ulr2,ulr3,ulr4) , no_torso, ulr_theta, thigh_right_pt )
-    upper_thigh_left = remove_section( (ull1,ull2,ull3,ull4) , no_torso, ull_theta, thigh_left_pt )
+    #upper_arm_left = remove_section( (ual1,ual2,ual3,ual4) , no_torso, ual_theta, shoulder_left_pt )
+    #upper_thigh_right = remove_section( (ulr1,ulr2,ulr3,ulr4) , no_torso, ulr_theta, thigh_right_pt )
+    #upper_thigh_left = remove_section( (ull1,ull2,ull3,ull4) , no_torso, ull_theta, thigh_left_pt )
 
 
-    cv2.imshow("current limb", upper_thigh_left)
+    cv2.imshow("arm right", upper_arm_right)
+    #cv2.imshow("arm left", upper_arm_left)
+    #cv2.imshow("leg left", upper_thigh_left)
+    #cv2.imshow("leg right", upper_thigh_right)
+
     # identifying right lower arm
-    #forearm_right_pt = find_midway(uar3,uar2)
-    #(lar1,lar2,lar3,lar4), uar_theta = fit_limb(upper_arm_right, forearm_right_pt, int(face_h//2), face_h, "center", 180, -180, -5)
-    #draw_rect(image, ( (lar1[0]+xA, lar1[1]+yA), (lar2[0]+xA, lar2[1]+yA), (lar3[0]+xA, lar3[1]+yA), (lar4[0]+xA, lar4[1]+yA) ) )
+    forearm_right_pt = find_midway(uar3,uar2)
+    (lar1,lar2,lar3,lar4), uar_theta = fit_limb(upper_arm_right, forearm_right_pt, int(face_h//2), face_h, "center", 180, -180, -5)
+    draw_rect(image, ( (lar1[0]+xA, lar1[1]+yA), (lar2[0]+xA, lar2[1]+yA), (lar3[0]+xA, lar3[1]+yA), (lar4[0]+xA, lar4[1]+yA) ) )
 
     # identifying left lower arm
     #forearm_left_pt = find_midway(ual3,ual2)
@@ -370,9 +388,9 @@ def main():
     #draw_rect(image, ( (lal1[0]+xA, lal1[1]+yA), (lal2[0]+xA, lal2[1]+yA), (lal3[0]+xA, lal3[1]+yA), (lal4[0]+xA, lal4[1]+yA) ) )
 
     # identifying right lower leg
-    shin_right_pt = find_midway(ulr3,ulr2)
-    (llr1,llr2,llr3,llr4), ulr_theta = fit_limb(upper_thigh_right, shin_right_pt, int(face_h//2), face_h, "center", 180, -180, -5)
-    draw_rect(image, ( (llr1[0]+xA, llr1[1]+yA), (llr2[0]+xA, llr2[1]+yA), (llr3[0]+xA, llr3[1]+yA), (llr4[0]+xA, llr4[1]+yA) ) )
+    #shin_right_pt = find_midway(ulr3,ulr2)
+    #(llr1,llr2,llr3,llr4), ulr_theta = fit_limb(upper_thigh_right, shin_right_pt, int(face_h//2), face_h, "center", 180, -180, -5)
+    #draw_rect(image, ( (llr1[0]+xA, llr1[1]+yA), (llr2[0]+xA, llr2[1]+yA), (llr3[0]+xA, llr3[1]+yA), (llr4[0]+xA, llr4[1]+yA) ) )
 
     # identifying left lower leg
     #shin_left_pt = find_midway(ull3,ull2)
@@ -382,7 +400,7 @@ def main():
 
     # show the original images with rectangles and the thresholded image
     cv2.imshow("mask", fgmask)
-    cv2.imshow("upper half", upper_half)
+    cv2.imshow("upper half", human)
     cv2.imshow("Boxes", image)
     cv2.waitKey()
     cv2.destroyAllWindows()
